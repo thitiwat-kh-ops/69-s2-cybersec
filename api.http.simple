@@ -7,8 +7,8 @@ POST http://localhost:9092/admin/login
 Content-Type: application/json
 
 {
-    "email": "",
-    "password": "",
+    "email": "{{$processEnv ADMIN_EMAIL}}",
+    "password": "{{$processEnv ADMIN_PASSWORD}}",
     "rememberMe": false
 }
 
@@ -17,12 +17,10 @@ POST http://localhost:9092/admin/register-admin
 Content-Type: application/json
 
 {
-    "registrationToken": "",
-    "userInfo": {
-        "firstname": "",
-        "lastname": "",
-        "password": ""
-    }
+    "firstname": "Test",
+    "lastname": "Test",
+    "email": "{{$processEnv ADMIN_EMAIL}}",
+    "password": "{{$processEnv ADMIN_PASSWORD}}"
 }
 
 ### 1.3 Forgot Password
@@ -30,7 +28,16 @@ POST http://localhost:9092/admin/forgot-password
 Content-Type: application/json
 
 {
-    "email": ""
+    "email": "{{$processEnv ADMIN_EMAIL}}"
+}
+
+### 1.3.1 Reset Password
+POST http://localhost:9092/admin/reset-password
+Content-Type: application/json
+
+{
+    "resetPasswordToken": "<CODE_FROM_EMAIL>",
+    "password": "{{$processEnv ADMIN_PASSWORD}}"
 }
 
 ### 1.4 Profile
@@ -46,8 +53,8 @@ POST http://localhost:9092/api/auth/local
 Content-Type: application/json
 
 {
-    "identifier": "",
-    "password": ""
+    "identifier": "{{$processEnv USER_EMAIL}}",
+    "password": "{{$processEnv USER_PASSWORD}}"
 }
 
 ### 2.2 Register
@@ -55,9 +62,9 @@ POST http://localhost:9092/api/auth/local/register
 Content-Type: application/json
 
 {
-    "username": "",
-    "email": "",
-    "password": ""
+    "username": "Test",
+    "email": "{{$processEnv USER_EMAIL}}",
+    "password": "{{$processEnv USER_PASSWORD}}"
 }
 
 ### 2.3 Forgot Password
@@ -65,10 +72,20 @@ POST http://localhost:9092/api/auth/forgot-password
 Content-Type: application/json
 
 {
-    "email": ""
+    "email": "{{$processEnv USER_EMAIL}}"
+}
+
+### 2.3.1 Reset Password
+POST http://localhost:9092/api/auth/reset-password
+Content-Type: application/json
+
+{
+    "code": "<CODE_FROM_EMAIL>",
+    "password": "{{$processEnv USER_PASSWORD}}",
+    "passwordConfirmation": "{{$processEnv USER_PASSWORD}}"
 }
 
 ### 2.4 Profile
 GET http://localhost:9092/api/users/me
 Content-Type: application/json
-Authorization: <ADMIN_TOKEN>
+Authorization: Bearer <USER_TOKEN>
