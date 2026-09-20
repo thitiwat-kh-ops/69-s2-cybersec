@@ -1,5 +1,20 @@
 # REST
 
+## Variables (อ่านจาก .env)
+@ADMIN_EMAIL = {{$dotenv ADMIN_EMAIL}}
+@ADMIN_PASSWORD = {{$dotenv ADMIN_PASSWORD}}
+@ADMIN_FIRSTNAME = {{$dotenv ADMIN_FIRSTNAME}}
+@ADMIN_LASTNAME = {{$dotenv ADMIN_LASTNAME}}
+@ADMIN_RESET_TOKEN = {{$dotenv ADMIN_RESET_TOKEN}}
+@ADMIN_JWT = {{$dotenv ADMIN_JWT}}
+
+@USER_EMAIL = {{$dotenv USER_EMAIL}}
+@USER_PASSWORD = {{$dotenv USER_PASSWORD}}
+@USER_USERNAME = {{$dotenv USER_USERNAME}}
+@USER_RESET_CODE = {{$dotenv USER_RESET_CODE}}
+@USER_JWT = {{$dotenv USER_JWT}}
+
+
 ## 1.Admin
 
 ### 1.1 Login
@@ -7,8 +22,8 @@ POST http://localhost:9092/admin/login
 Content-Type: application/json
 
 {
-    "email": "{{$processEnv ADMIN_EMAIL}}",
-    "password": "{{$processEnv ADMIN_PASSWORD}}",
+    "email": "{{ADMIN_EMAIL}}",
+    "password": "{{ADMIN_PASSWORD}}",
     "rememberMe": false
 }
 
@@ -17,10 +32,10 @@ POST http://localhost:9092/admin/register-admin
 Content-Type: application/json
 
 {
-    "firstname": "Test",
-    "lastname": "Test",
-    "email": "{{$processEnv ADMIN_EMAIL}}",
-    "password": "{{$processEnv ADMIN_PASSWORD}}"
+    "firstname": "{{ADMIN_FIRSTNAME}}",
+    "lastname": "{{ADMIN_LASTNAME}}",
+    "email": "{{ADMIN_EMAIL}}",
+    "password": "{{ADMIN_PASSWORD}}"
 }
 
 ### 1.3 Forgot Password
@@ -28,7 +43,7 @@ POST http://localhost:9092/admin/forgot-password
 Content-Type: application/json
 
 {
-    "email": "{{$processEnv ADMIN_EMAIL}}"
+    "email": "{{ADMIN_EMAIL}}"
 }
 
 ### 1.3.1 Reset Password
@@ -36,14 +51,14 @@ POST http://localhost:9092/admin/reset-password
 Content-Type: application/json
 
 {
-    "resetPasswordToken": "<CODE_FROM_EMAIL>",
-    "password": "{{$processEnv ADMIN_PASSWORD}}"
+    "resetPasswordToken": "{{ADMIN_RESET_TOKEN}}",
+    "password": "{{ADMIN_PASSWORD}}"
 }
 
 ### 1.4 Profile
 GET http://localhost:9092/admin/users/me
 Content-Type: application/json
-Authorization: Bearer <ADMIN_TOKEN>
+Authorization: Bearer {{ADMIN_JWT}}
 
 
 ## 2.User
@@ -53,8 +68,8 @@ POST http://localhost:9092/api/auth/local
 Content-Type: application/json
 
 {
-    "identifier": "{{$processEnv USER_EMAIL}}",
-    "password": "{{$processEnv USER_PASSWORD}}"
+    "identifier": "{{USER_EMAIL}}",
+    "password": "{{USER_PASSWORD}}"
 }
 
 ### 2.2 Register
@@ -62,9 +77,9 @@ POST http://localhost:9092/api/auth/local/register
 Content-Type: application/json
 
 {
-    "username": "Test",
-    "email": "{{$processEnv USER_EMAIL}}",
-    "password": "{{$processEnv USER_PASSWORD}}"
+    "username": "{{USER_USERNAME}}",
+    "email": "{{USER_EMAIL}}",
+    "password": "{{USER_PASSWORD}}"
 }
 
 ### 2.3 Forgot Password
@@ -72,7 +87,7 @@ POST http://localhost:9092/api/auth/forgot-password
 Content-Type: application/json
 
 {
-    "email": "{{$processEnv USER_EMAIL}}"
+    "email": "{{USER_EMAIL}}"
 }
 
 ### 2.3.1 Reset Password
@@ -80,12 +95,12 @@ POST http://localhost:9092/api/auth/reset-password
 Content-Type: application/json
 
 {
-    "code": "<CODE_FROM_EMAIL>",
-    "password": "{{$processEnv USER_PASSWORD}}",
-    "passwordConfirmation": "{{$processEnv USER_PASSWORD}}"
+    "code": "{{USER_RESET_CODE}}",
+    "password": "{{USER_PASSWORD}}",
+    "passwordConfirmation": "{{USER_PASSWORD}}"
 }
 
 ### 2.4 Profile
 GET http://localhost:9092/api/users/me
 Content-Type: application/json
-Authorization: Bearer <USER_TOKEN>
+Authorization: Bearer {{USER_JWT}}

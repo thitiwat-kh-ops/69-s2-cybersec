@@ -1,0 +1,10 @@
+{
+  "name": "@strapi/provider-email-console",
+  "version": "0.0.1",
+  "description": "mock provider for strapi email (logs to console)",
+  "main": "lib/index.js",
+  "strapi": {
+    "kind": "provider",
+    "name": "email-console"
+  }
+}

@@ -21,6 +21,8 @@ services:
       - PGADMIN_DEFAULT_PASSWORD=${PGADMIN_DEFAULT_PASSWORD}
     volumes:
       - ./data-pgadmin:/var/lib/pgadmin
+    depends_on:
+      - db
 
   app:
     image: prawee/strapi
@@ -32,10 +34,35 @@ services:
       - DATABASE_HOST=db
       - DATABASE_PORT=5432
       - DATABASE_NAME=${POSTGRES_DB}
-      - DATABASE_USERNAME=${POSTGRES_USER}
-      - DATABASE_PASSWORD=${POSTGRES_PASSWORD}
+      - DATABASE_USERNAME=${STRAPI_DB_USER}
+      - DATABASE_PASSWORD=${STRAPI_DB_PASSWORD}
+    volumes:
+      - ./config/plugins.js:/opt/app/config/plugins.js:ro
+      - ./patches/config-admin.js:/opt/app/config/admin.js:ro
+      - ./secrets/app.env:/opt/app/.env:ro
+      - ./provider-email-console:/opt/node_modules/@strapi/provider-email-console:ro
+      - ./patches/audit-log:/opt/node_modules/audit-log:ro
+      - ./patches/users-permissions/auth.js:/opt/node_modules/@strapi/plugin-users-permissions/server/controllers/auth.js:ro
+      - ./patches/users-permissions/routes-auth.js:/opt/node_modules/@strapi/plugin-users-permissions/server/routes/content-api/auth.js:ro
+      - ./patches/admin/authentication.js:/opt/node_modules/@strapi/admin/server/controllers/authentication.js:ro
+      - ./patches/admin/routes-authentication.js:/opt/node_modules/@strapi/admin/server/routes/authentication.js:ro
+      - ./patches/admin/services-auth.js:/opt/node_modules/@strapi/admin/server/services/auth.js:ro
+      - ./patches/admin/build/index.html:/opt/app/build/index.html:ro
+      - ./patches/admin/build/main.5d05ffc2.js:/opt/app/build/main.5d05ffc2.js:ro
+      - ./patches/admin/build/main.0a1c2b3d.js:/opt/app/build/main.0a1c2b3d.js:ro
     depends_on:
       - db
+
+  proxy:
+    image: nginx:alpine
+    container_name: 69-s2-proxy
+    ports:
+      - 9443:443
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    command: /bin/sh -c "apk add --no-cache openssl >/dev/null 2>&1 && mkdir -p /etc/nginx/certs && openssl req -x509 -newkey rsa:2048 -keyout /etc/nginx/certs/server.key -out /etc/nginx/certs/server.crt -days 365 -nodes -subj '/CN=localhost' >/dev/null 2>&1 && nginx -g 'daemon off;'"
+    depends_on:
+      - app
 
 volumes:
   data-postgres:

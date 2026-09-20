@@ -1,3 +1,8 @@
 .env
+secrets/
 data-postgres/
 data-pgadmin/
+api.http
+patches/db/
+imple
+test.http
