@@ -13,8 +13,15 @@ module.exports = {
         options.text = options.text || options.html;
         options.html = options.html || options.text;
 
+        const maskSensitive = (value) => {
+          if (typeof value !== 'string') return value;
+          return value
+            .replace(/[?&](?:code|token)=[^\s&]+/gi, (m) => m.replace(/=([^\s&]+)$/, '=[REDACTED]'))
+            .replace(/\b\d{6}\b/g, '******');
+        };
+
         strapi.log.debug(
-          `SendEmail mock:\n\tto: ${options.to}\n\tfrom: ${options.from}\n\tsubject: ${options.subject}\n\ttext: ${options.text || options.html}`
+          `SendEmail mock:\n\tto: ${options.to}\n\tfrom: ${options.from}\n\tsubject: ${options.subject}\n\ttext: ${maskSensitive(options.text || options.html)}`
         );
 
         return Promise.resolve();

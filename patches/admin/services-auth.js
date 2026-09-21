@@ -3,17 +3,17 @@
 const bcrypt = require('bcryptjs');
 const _ = require('lodash');
 const { getAbsoluteAdminUrl } = require('@strapi/utils');
-const { ApplicationError } = require('@strapi/utils').errors;
+const { ApplicationError, ValidationError } = require('@strapi/utils').errors;
 const { getService } = require('../utils');
 
-const { sha256, tokenData, tokenValid } = require('audit-log');
+const { sha256, tokenData, tokenValid, checkPasswordPolicy } = require('audit-log');
 
 /**
  * hashes a password
  * @param {string} password - password to hash
  * @returns {string} hashed password
  */
-const hashPassword = (password) => bcrypt.hash(password, 10);
+const hashPassword = (password) => bcrypt.hash(password, 12);
 
 /**
  * Validate a password
@@ -43,7 +43,8 @@ const checkCredentials = async ({ email, password }) => {
   }
 
   if (!(user.isActive === true)) {
-    return [null, false, { message: 'User not active' }];
+    // I2: generic message - never reveal whether the account exists or is inactive.
+    return [null, false, { message: 'Invalid credentials' }];
   }
 
   return [null, user];
@@ -99,6 +100,10 @@ const forgotPassword = async ({ email } = {}) => {
 const resetPassword = async ({ resetPasswordToken, password } = {}) => {
   if (!resetPasswordToken) {
     throw new ApplicationError();
+  }
+  const policyError = checkPasswordPolicy(password);
+  if (policyError) {
+    throw new ValidationError(policyError);
   }
   const hashPrefix = sha256(resetPasswordToken) + ':';
   const matchingUser = await strapi

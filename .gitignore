@@ -6,3 +6,9 @@ api.http
 patches/db/
 imple
 test.http
+
+# รหัส/secret ไฟล์สำรอง (defense-in-depth)
+*.env
+*.pem
+*.key
+*.crt

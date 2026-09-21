@@ -77,6 +77,7 @@ module.exports = [
     path: '/auth/send-email-confirmation',
     handler: 'auth.sendEmailConfirmation',
     config: {
+      middlewares: ['plugin::users-permissions.rateLimit'],
       prefix: '',
     },
   },
@@ -85,6 +86,16 @@ module.exports = [
     path: '/auth/change-password',
     handler: 'auth.changePassword',
     config: {
+      middlewares: ['plugin::users-permissions.rateLimit'],
+      prefix: '',
+    },
+  },
+  {
+    method: 'POST',
+    path: '/auth/logout',
+    handler: 'auth.logout',
+    config: {
+      auth: false,
       middlewares: ['plugin::users-permissions.rateLimit'],
       prefix: '',
     },

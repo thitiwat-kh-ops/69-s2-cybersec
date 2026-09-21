@@ -26,6 +26,8 @@ const {
   tokenData,
   tokenValid,
   checkPasswordPolicy,
+  createAttemptTracker,
+  ensureTable,
   audit,
 } = require('audit-log');
 
@@ -36,18 +38,34 @@ const sanitizeUser = (user, ctx) => {
   return sanitize.contentAPI.output(user, userSchema, { auth });
 };
 
-const auditCtx = (ctx, extra) =>
-  audit({
+const auditCtx = (ctx, extra) => {
+  const stateUser = ctx.state && ctx.state.user;
+  const username = (stateUser && (stateUser.username || stateUser.email)) || null;
+  return audit({
     ip: (ctx.request && ctx.request.ip) || null,
     userAgent: (ctx.request && ctx.request.headers && ctx.request.headers['user-agent']) || null,
+    username,
     ...extra,
   });
+};
 
 const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Au8: user login lockout - 5 failed passwords in 15 min locks the identifier (auto-unlocks).
+const loginAttempts = createAttemptTracker({ max: 5, windowMs: 15 * 60 * 1000 });
+
+const loginKey = (id) => String(id || '').toLowerCase();
 
 const newRefreshToken = async (userId) => {
   const plain = crypto.randomBytes(48).toString('hex');
   const conn = strapi.db.connection('refresh_tokens');
+  await ensureTable('refresh_tokens', (table) => {
+    table.increments('id');
+    table.integer('user_id');
+    table.string('token_hash', 128);
+    table.bigInteger('expires_at');
+  });
   await conn.where({ user_id: userId }).del();
   await conn.insert({
     user_id: userId,
@@ -114,6 +132,17 @@ module.exports = {
       await validateCallbackBody(params);
 
       const { identifier } = params;
+      const idKey = loginKey(identifier);
+
+      if (idKey && (await loginAttempts.isLocked(idKey))) {
+        auditCtx(ctx, {
+          action: 'user_login',
+          email: identifier.toLowerCase(),
+          username: identifier.toLowerCase(),
+          result: 'locked',
+        });
+        throw new ApplicationError('Too many failed attempts. Try again later.');
+      }
 
       // Check if the user exists.
       const user = await strapi.query('plugin::users-permissions.user').findOne({
@@ -124,12 +153,22 @@ module.exports = {
       });
 
       if (!user) {
-        auditCtx(ctx, { action: 'user_login', email: identifier.toLowerCase(), result: 'failed' });
+        auditCtx(ctx, {
+          action: 'user_login',
+          email: identifier.toLowerCase(),
+          username: identifier.toLowerCase(),
+          result: 'failed',
+        });
         throw new ValidationError('Invalid identifier or password');
       }
 
       if (!user.password) {
-        auditCtx(ctx, { action: 'user_login', email: user.email, result: 'failed' });
+        auditCtx(ctx, {
+          action: 'user_login',
+          email: user.email,
+          username: user.username || user.email,
+          result: 'failed',
+        });
         throw new ValidationError('Invalid identifier or password');
       }
 
@@ -139,7 +178,13 @@ module.exports = {
       );
 
       if (!validPassword) {
-        auditCtx(ctx, { action: 'user_login', email: user.email, result: 'failed' });
+        if (idKey) await loginAttempts.markFailure(idKey);
+        auditCtx(ctx, {
+          action: 'user_login',
+          email: user.email,
+          username: user.username || user.email,
+          result: 'failed',
+        });
         throw new ValidationError('Invalid identifier or password');
       }
 
@@ -147,17 +192,34 @@ module.exports = {
       const requiresConfirmation = _.get(advancedSettings, 'email_confirmation');
 
       if (requiresConfirmation && user.confirmed !== true) {
-        auditCtx(ctx, { action: 'user_login', email: user.email, result: 'failed' });
+        auditCtx(ctx, {
+          action: 'user_login',
+          email: user.email,
+          username: user.username || user.email,
+          result: 'failed',
+        });
         throw new ApplicationError('Your account email is not confirmed');
       }
 
       if (user.blocked === true) {
-        auditCtx(ctx, { action: 'user_login', email: user.email, result: 'failed' });
+        auditCtx(ctx, {
+          action: 'user_login',
+          email: user.email,
+          username: user.username || user.email,
+          result: 'failed',
+        });
         throw new ApplicationError('Your account has been blocked by an administrator');
       }
 
+      if (idKey) await loginAttempts.clear(idKey);
+
       const refreshToken = await newRefreshToken(user.id);
-      auditCtx(ctx, { action: 'user_login', email: user.email, result: 'success' });
+      auditCtx(ctx, {
+        action: 'user_login',
+        email: user.email,
+        username: user.username || user.email,
+        result: 'success',
+      });
 
       return ctx.send({
         jwt: getService('jwt').issue({ id: user.id }),
@@ -200,13 +262,87 @@ module.exports = {
       throw new ApplicationError('Invalid refresh token');
     }
 
+    // A9: a revoked/blocked account must not obtain new JWTs via refresh.
+    if (user.blocked === true) {
+      auditCtx(ctx, {
+        action: 'token_refresh',
+        email: user.email,
+        username: user.username || user.email,
+        result: 'failed',
+      });
+      throw new ApplicationError('Your account has been blocked by an administrator');
+    }
+
+    const advancedSettings = await strapi
+      .store({ type: 'plugin', name: 'users-permissions' })
+      .get({ key: 'advanced' });
+    const requiresConfirmation = _.get(advancedSettings, 'email_confirmation');
+
+    if (requiresConfirmation && user.confirmed !== true) {
+      auditCtx(ctx, {
+        action: 'token_refresh',
+        email: user.email,
+        username: user.username || user.email,
+        result: 'failed',
+      });
+      throw new ApplicationError('Your account email is not confirmed');
+    }
+
     const newToken = await newRefreshToken(user.id);
-    auditCtx(ctx, { action: 'token_refresh', email: user.email, result: 'success' });
+    auditCtx(ctx, {
+      action: 'token_refresh',
+      email: user.email,
+      username: user.username || user.email,
+      result: 'success',
+    });
 
     return ctx.send({
       jwt: getService('jwt').issue({ id: user.id }),
       refreshToken: newToken,
     });
+  },
+
+  async logout(ctx) {
+    const header = ctx.request && ctx.request.header && ctx.request.header.authorization;
+    const token =
+      header && header.match(/^Bearer\s+(\S+)$/i) ? header.replace(/^Bearer\s+/i, '') : null;
+
+    if (!token) {
+      throw new ValidationError('You must be authenticated to logout');
+    }
+
+    let payload;
+    try {
+      payload = await getService('jwt').verify(token);
+    } catch (err) {
+      throw new ValidationError('You must be authenticated to logout');
+    }
+
+    if (!payload || !payload.id) {
+      throw new ValidationError('You must be authenticated to logout');
+    }
+
+    const conn = strapi.db.connection('refresh_tokens');
+    await ensureTable('refresh_tokens', (table) => {
+      table.increments('id');
+      table.integer('user_id');
+      table.string('token_hash', 128);
+      table.bigInteger('expires_at');
+    });
+    // Revoke every active refresh token so the session ends now, not in 7 days.
+    await conn.where({ user_id: payload.id }).del();
+
+    const user = await strapi
+      .query('plugin::users-permissions.user')
+      .findOne({ where: { id: payload.id } });
+    auditCtx(ctx, {
+      action: 'user_logout',
+      email: (user && user.email) || null,
+      username: (user && (user.username || user.email)) || null,
+      result: 'success',
+    });
+
+    ctx.send({ ok: true });
   },
 
   async changePassword(ctx) {
@@ -282,7 +418,12 @@ module.exports = {
     });
 
     const refreshToken = await newRefreshToken(user.id);
-    auditCtx(ctx, { action: 'user_reset_password', email: user.email, result: 'success' });
+    auditCtx(ctx, {
+      action: 'user_reset_password',
+      email: user.email,
+      username: user.username || user.email,
+      result: 'success',
+    });
 
     // Update the user.
     ctx.send({
@@ -343,8 +484,27 @@ module.exports = {
       .query('plugin::users-permissions.user')
       .findOne({ where: { email: email.toLowerCase() } });
 
-    if (!user || user.blocked) {
-      auditCtx(ctx, { action: 'user_forgot_password', email: email.toLowerCase(), result: 'blocked' });
+    if (!user) {
+      auditCtx(ctx, {
+        action: 'user_forgot_password',
+        email: email.toLowerCase(),
+        username: email.toLowerCase(),
+        result: 'not_found',
+      });
+      // I3: keep response timing uniform - account existence must not be derivable.
+      await sleep(600);
+      return ctx.send({ ok: true });
+    }
+
+    if (user.blocked === true) {
+      auditCtx(ctx, {
+        action: 'user_forgot_password',
+        email: email.toLowerCase(),
+        username: email.toLowerCase(),
+        result: 'blocked_attempt',
+      });
+      // I3: keep response timing uniform - account existence must not be derivable.
+      await sleep(600);
       return ctx.send({ ok: true });
     }
 
@@ -386,10 +546,18 @@ module.exports = {
 
     // NOTE: Update the user before sending the email so an Admin can generate the link if the email fails
     await getService('user').edit(user.id, { resetPasswordToken: stored });
-    auditCtx(ctx, { action: 'user_forgot_password', email: user.email, result: 'success' });
+    auditCtx(ctx, {
+      action: 'user_forgot_password',
+      email: user.email,
+      username: user.username || user.email,
+      result: 'success',
+    });
 
     // Send an email to the user.
     await strapi.plugin('email').service('email').send(emailToSend);
+
+    // I3: uniform delay so both branches answer in the same amount of time.
+    await sleep(600);
 
     ctx.send({ ok: true });
   },
@@ -447,7 +615,12 @@ module.exports = {
 
     const policyError = checkPasswordPolicy(params.password);
     if (policyError) {
-      auditCtx(ctx, { action: 'user_register', email: params.email, result: 'failed' });
+      auditCtx(ctx, {
+        action: 'user_register',
+        email: params.email,
+        username: params.username || params.email,
+        result: 'failed',
+      });
       throw new ValidationError(policyError);
     }
 
@@ -475,10 +648,16 @@ module.exports = {
     });
 
     if (conflictingUserCount > 0) {
-      // I2: identical response shape to avoid leaking account existence
-      auditCtx(ctx, { action: 'user_register', email: email.toLowerCase(), result: 'blocked' });
+      // I2: identical response shape (_jwt + user_) to avoid leaking account existence.
+      auditCtx(ctx, {
+          action: 'user_register',
+          email: email.toLowerCase(),
+          username: username || email.toLowerCase(),
+          result: 'blocked',
+        });
       return ctx.send({
-        user: { username, email: email.toLowerCase(), provider },
+        jwt: null,
+        user: { username, email: email.toLowerCase(), provider, confirmed: false, blocked: false },
       });
     }
 
@@ -488,9 +667,15 @@ module.exports = {
       });
 
       if (conflictingUserCount > 0) {
-        auditCtx(ctx, { action: 'user_register', email: email.toLowerCase(), result: 'blocked' });
+        auditCtx(ctx, {
+          action: 'user_register',
+          email: email.toLowerCase(),
+          username: username || email.toLowerCase(),
+          result: 'blocked',
+        });
         return ctx.send({
-          user: { username, email: email.toLowerCase(), provider },
+          jwt: null,
+          user: { username, email: email.toLowerCase(), provider, confirmed: false, blocked: false },
         });
       }
     }
@@ -507,7 +692,12 @@ module.exports = {
 
     const sanitizedUser = await sanitizeUser(user, ctx);
 
-    auditCtx(ctx, { action: 'user_register', email: user.email, result: 'success' });
+    auditCtx(ctx, {
+      action: 'user_register',
+      email: user.email,
+      username: user.username || user.email,
+      result: 'success',
+    });
 
     if (settings.email_confirmation) {
       try {
@@ -516,7 +706,7 @@ module.exports = {
         throw new ApplicationError(err.message);
       }
 
-      return ctx.send({ user: sanitizedUser });
+      return ctx.send({ jwt: null, user: sanitizedUser });
     }
 
     const jwt = getService('jwt').issue(_.pick(user, ['id']));
@@ -542,7 +732,12 @@ module.exports = {
     }
 
     await userService.edit(user.id, { confirmed: true, confirmationToken: null });
-    auditCtx(ctx, { action: 'user_email_confirm', email: user.email, result: 'success' });
+    auditCtx(ctx, {
+      action: 'user_email_confirm',
+      email: user.email,
+      username: user.username || user.email,
+      result: 'success',
+    });
 
     if (returnUser) {
       ctx.send({
@@ -561,26 +756,24 @@ module.exports = {
   async sendEmailConfirmation(ctx) {
     const { email } = await validateSendEmailConfirmationBody(ctx.request.body);
 
+    const normalizedEmail = email.toLowerCase();
+
     const user = await strapi.query('plugin::users-permissions.user').findOne({
-      where: { email: email.toLowerCase() },
+      where: { email: normalizedEmail },
     });
 
-    if (!user) {
-      return ctx.send({ email, sent: true });
+    if (user && !user.confirmed && !user.blocked) {
+      await sendEmailConfirmationInternal(ctx, user);
     }
 
-    if (user.confirmed) {
-      throw new ApplicationError('Already confirmed');
-    }
-
-    if (user.blocked) {
-      throw new ApplicationError('User blocked');
-    }
-
-    await sendEmailConfirmationInternal(ctx, user);
+    auditCtx(ctx, {
+      action: 'user_send_email_confirmation',
+      email: normalizedEmail,
+      result: 'success',
+    });
 
     ctx.send({
-      email: user.email,
+      email: normalizedEmail,
       sent: true,
     });
   },
